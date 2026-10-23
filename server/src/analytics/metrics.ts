@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { config, type SegmentId } from '../config.js';
 import { db as sharedDb } from '../db/index.js';
+import { langClause } from './langs.js';
 import { previousRange, type DateRange } from './range.js';
 import { segmentSql } from './segments.js';
 import { dayRange, today } from './time.js';
@@ -33,14 +34,20 @@ export interface SegmentRow {
 
 const tzSeconds = () => config.tzOffsetHours * 3600;
 
-export function daily(appid: number, range: DateRange, conn: DatabaseSync = sharedDb()): DailyPoint[] {
+export function daily(
+  appid: number,
+  range: DateRange,
+  langs: string[] = [],
+  conn: DatabaseSync = sharedDb(),
+): DailyPoint[] {
+  const lang = langClause(langs);
   const rows = conn
     .prepare(
       `SELECT date(created_at + ?, 'unixepoch') AS day, SUM(voted_up) AS pos, COUNT(*) AS total
-       FROM reviews WHERE appid = ? AND created_at >= ? AND created_at < ?
+       FROM reviews WHERE appid = ? AND created_at >= ? AND created_at < ?${lang.sql}
        GROUP BY day`,
     )
-    .all(tzSeconds(), appid, range.fromTs, range.toTs) as { day: string; pos: number; total: number }[];
+    .all(tzSeconds(), appid, range.fromTs, range.toTs, ...lang.params) as { day: string; pos: number; total: number }[];
   const byDay = new Map(rows.map((r) => [r.day, r]));
   const now = today();
   return dayRange(range.from, range.to).map((date) => {
@@ -66,14 +73,20 @@ export function averageDailyRate(points: DailyPoint[]): number | null {
   return eligible.reduce((sum, p) => sum + (p.rate as number), 0) / eligible.length;
 }
 
-export function segments(appid: number, range: DateRange, conn: DatabaseSync = sharedDb()): SegmentRow[] {
+export function segments(
+  appid: number,
+  range: DateRange,
+  langs: string[] = [],
+  conn: DatabaseSync = sharedDb(),
+): SegmentRow[] {
+  const lang = langClause(langs);
   const rows = conn
     .prepare(
       `SELECT ${segmentSql()} AS seg, COUNT(*) AS n, SUM(voted_up) AS pos
-       FROM reviews WHERE appid = ? AND created_at >= ? AND created_at < ?
+       FROM reviews WHERE appid = ? AND created_at >= ? AND created_at < ?${lang.sql}
        GROUP BY seg`,
     )
-    .all(appid, range.fromTs, range.toTs) as { seg: SegmentId; n: number; pos: number }[];
+    .all(appid, range.fromTs, range.toTs, ...lang.params) as { seg: SegmentId; n: number; pos: number }[];
   const total = rows.reduce((s, r) => s + r.n, 0);
   return config.segments.map((s) => {
     const r = rows.find((x) => x.seg === s.id);
@@ -129,9 +142,10 @@ export function summary(
   appid: number,
   range: DateRange,
   coveredFrom: number | null,
+  langs: string[] = [],
   conn: DatabaseSync = sharedDb(),
 ) {
-  const points = daily(appid, range, conn);
+  const points = daily(appid, range, langs, conn);
   const avg = averageDailyRate(points);
   const total = points.reduce((s, p) => s + p.total, 0);
   const positive = points.reduce((s, p) => s + p.positive, 0);
@@ -143,13 +157,9 @@ export function summary(
 
   const prev = previousRange(range);
   const prevCovered = coveredFrom !== null && coveredFrom <= prev.fromTs;
-  const prevAvg = prevCovered ? averageDailyRate(daily(appid, prev, conn)) : null;
+  const prevAvg = prevCovered ? averageDailyRate(daily(appid, prev, langs, conn)) : null;
 
-  const keywordLang = conn
-    .prepare('SELECT COUNT(*) AS n FROM reviews WHERE appid = ? AND language = ? AND created_at >= ? AND created_at < ?')
-    .get(appid, config.keywords.language, range.fromTs, range.toTs) as { n: number };
-
-  const segs = segments(appid, range, conn);
+  const segs = segments(appid, range, langs, conn);
   return {
     range: { from: range.from, to: range.to },
     avgDailyRate: avg,
@@ -162,7 +172,25 @@ export function summary(
     perDay: points.length ? total / points.length : 0,
     pooledRate: total ? positive / total : null,
     lowestDay: lowest ? { ...lowest, volumeRatio: avgVolume ? lowest.total / avgVolume : null } : null,
-    keywordLanguageReviews: keywordLang.n,
+    /** Selected languages; empty = all. */
+    languages: langs,
     insights: { trend: trendInsight(points, avg), segments: segmentInsight(segs) },
   };
+}
+
+export interface LanguageCount {
+  code: string;
+  count: number;
+  positive: number;
+}
+
+/** Reviews per language in the range (unfiltered), most reviews first. Feeds the language picker. */
+export function languages(appid: number, range: DateRange, conn: DatabaseSync = sharedDb()): LanguageCount[] {
+  return conn
+    .prepare(
+      `SELECT language AS code, COUNT(*) AS count, SUM(voted_up) AS positive
+       FROM reviews WHERE appid = ? AND created_at >= ? AND created_at < ?
+       GROUP BY language ORDER BY count DESC, language`,
+    )
+    .all(appid, range.fromTs, range.toTs) as unknown as LanguageCount[];
 }

@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { openDb, setDb } from '../src/db/index.js';
 import { addDays, dayKey, dayStart, isoWeek, today, weekBounds } from '../src/analytics/time.js';
 import { segmentOf } from '../src/analytics/segments.js';
-import { averageDailyRate, daily, segments, segmentInsight, summary, type DailyPoint } from '../src/analytics/metrics.js';
+import { averageDailyRate, daily, languages, segments, segmentInsight, summary, type DailyPoint } from '../src/analytics/metrics.js';
 import { makeRange, resolveRange } from '../src/analytics/range.js';
 import { keywords, reviewList } from '../src/analytics/keywords.js';
 import { runSync } from '../src/sync/syncGame.js';
@@ -67,6 +67,16 @@ describe('text', () => {
     expect(terms).toContain('太肝');
     expect(terms).not.toContain('游戏');
     expect(terms).not.toContain('这个');
+  });
+
+  it('splits other languages into words and phrases', () => {
+    const en = extractTerms('The frame rate drops on Steam Deck. Great game!', 'english');
+    expect(en).toEqual(expect.arrayContaining(['frame', 'frame rate', 'drops', 'steam deck']));
+    expect(en).not.toContain('the');
+    expect(en).not.toContain('game');
+    const ja = extractTerms('ストーリーが素晴らしいですが、フレームレートが低下します。', 'japanese');
+    expect(ja).toEqual(expect.arrayContaining(['ストーリー', 'フレームレート']));
+    expect(extractTerms('Отличная оптимизация', 'russian')).toContain('оптимизация');
   });
 });
 
@@ -182,18 +192,57 @@ describe('metrics and keywords on stored reviews', () => {
     expect(segs.find((s) => s.id === 'normal')?.count).toBe(1);
     expect(segmentInsight(segs)).toBe('HardCore Players are 100 points less positive than New Players.');
 
-    const kw = keywords(APP, { range });
+    const kw = keywords(APP, { range, langs: ['schinese'] });
     expect(kw.insufficient).toBe(false);
     expect(kw.reviews).toEqual({ total: 22, positive: 12, negative: 10 });
     expect(kw.positive.map((k) => k.term)).toContain('配乐');
     expect(kw.negative.map((k) => k.term)).toContain('掉帧');
     expect(kw.negative.find((k) => k.term === '掉帧')?.count).toBe(10);
 
-    const rv = reviewList(APP, { range, term: '掉帧', sentiment: 'n' });
+    const rv = reviewList(APP, { range, term: '掉帧', sentiment: 'n', sort: 'helpful' });
     expect(rv.total).toBe(10);
     expect(rv.items[0].votesUp).toBe(9); // most helpful first
     expect(rv.items[0].segment).toBe('hard');
+    expect(rv.items[0].language).toBe('schinese');
     expect(reviewList(APP, { range, segment: 'new', sentiment: 'n' }).total).toBe(0);
+  });
+
+  it('filters every view by the selected languages', async () => {
+    const list: SteamReview[] = [];
+    for (let i = 0; i < 20; i++) list.push(review({ created: at(d0), language: 'schinese', voted_up: i < 15, review: '剧情很好，配乐也不错' }));
+    for (let i = 0; i < 20; i++) list.push(review({ created: at(d0), language: 'english', voted_up: i < 5, review: 'Terrible optimization, constant stutter' }));
+    for (let i = 0; i < 4; i++) list.push(review({ created: at(d0), language: 'japanese', review: 'ストーリーが素晴らしい' }));
+    await seed(list);
+    const range = makeRange(d0, d0);
+
+    // All languages
+    expect(daily(APP, range)[0].total).toBe(44);
+    expect(keywords(APP, { range }).reviews.total).toBe(44);
+    // One language
+    expect(daily(APP, range, ['english'])[0].rate).toBeCloseTo(0.25);
+    expect(segments(APP, range, ['schinese']).reduce((s, r) => s + r.count, 0)).toBe(20);
+    // Several languages
+    expect(daily(APP, range, ['english', 'japanese'])[0].total).toBe(24);
+    const en = keywords(APP, { range, langs: ['english'] });
+    expect(en.negative.map((k) => k.term)).toContain('optimization');
+    expect(en.positive.every((k) => /[a-z]/.test(k.term))).toBe(true);
+    expect(reviewList(APP, { range, langs: ['japanese'] }).total).toBe(4);
+    expect(reviewList(APP, { range, langs: ['english'], term: 'stutter' }).total).toBe(20);
+
+    const langs = languages(APP, range);
+    expect(langs.map((l) => [l.code, l.count])).toEqual([['english', 20], ['schinese', 20], ['japanese', 4]]);
+  });
+
+  it('sorts reviews newest first by default, or oldest / most helpful', async () => {
+    await seed([
+      review({ created: at(d0, 9), votes_up: 50, review: 'a' }),
+      review({ created: at(d0, 18), votes_up: 1, review: 'b' }),
+      review({ created: at(addDays(d0, 1), 10), votes_up: 5, review: 'c' }),
+    ]);
+    const range = makeRange(d0, addDays(d0, 1));
+    expect(reviewList(APP, { range }).items.map((r) => r.text)).toEqual(['c', 'b', 'a']);
+    expect(reviewList(APP, { range, sort: 'old' }).items.map((r) => r.text)).toEqual(['a', 'b', 'c']);
+    expect(reviewList(APP, { range, sort: 'helpful' }).items.map((r) => r.text)).toEqual(['a', 'c', 'b']);
   });
 
   it('flags too few keyword-language reviews', async () => {

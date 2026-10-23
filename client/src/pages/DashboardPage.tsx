@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useAutoSync, useDaily, useSegments, useSummary } from '../api/hooks';
+import { useAutoSync, useDaily, useLanguages, useSegments, useSummary } from '../api/hooks';
 import { GameHeader } from '../components/GameHeader';
 import { KpiTiles } from '../components/KpiTiles';
+import { LanguagePicker } from '../components/LanguagePicker';
 import { SegmentPanel } from '../components/SegmentPanel';
 import { TalkingPoints } from '../components/TalkingPoints';
 import { TopBar } from '../components/TopBar';
@@ -19,9 +20,10 @@ export function DashboardPage() {
 
   // Charts wait for the first sync so they don't flash an empty state.
   const ready = !!g && g.lastSyncedAt !== null;
-  const summary = useSummary(appid, params.range, ready);
-  const daily = useDaily(appid, params.range, ready);
-  const segs = useSegments(appid, params.range, ready);
+  const langList = useLanguages(appid, params.range, ready);
+  const summary = useSummary(appid, params.range, params.langs, ready);
+  const daily = useDaily(appid, params.range, params.langs, ready);
+  const segs = useSegments(appid, params.range, params.langs, ready);
 
   useEffect(() => {
     if (g) document.title = `${g.name} · Review Pulse`;
@@ -44,7 +46,16 @@ export function DashboardPage() {
         onRange={(range) => update({ range })}
         onSync={() => sync.mutate()}
         syncPending={sync.isPending}
-      />
+      >
+        {ready && (
+          <LanguagePicker
+            available={langList.data?.languages}
+            selected={params.langs}
+            // A new language set changes the keywords, so a picked keyword no longer applies.
+            onChange={(langs) => update({ langs, term: null })}
+          />
+        )}
+      </TopBar>
 
       {game.isError && <div className="card empty big error">{(game.error as Error).message}</div>}
       {sync.isError && <div className="banner error">Sync could not start: {(sync.error as Error).message}</div>}
@@ -59,7 +70,12 @@ export function DashboardPage() {
       )}
 
       {ready && summary.data && daily.data && (
-        <KpiTiles summary={summary.data} points={daily.data.points} rangeLabel={RANGE_LABEL[params.range]} />
+        <KpiTiles
+          summary={summary.data}
+          points={daily.data.points}
+          rangeLabel={RANGE_LABEL[params.range]}
+          languageCount={langList.data?.languages.length ?? 0}
+        />
       )}
 
       {ready && (
@@ -89,7 +105,9 @@ export function DashboardPage() {
         </div>
       )}
 
-      {ready && <TalkingPoints appid={appid} params={params} update={update} ready={ready} />}
+      {ready && g && (
+        <TalkingPoints appid={appid} params={params} update={update} ready={ready} firstDay={g.firstDay} today={g.today} />
+      )}
     </div>
   );
 }

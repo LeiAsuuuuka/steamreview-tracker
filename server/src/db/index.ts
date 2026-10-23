@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 CREATE INDEX IF NOT EXISTS reviews_app_created ON reviews (appid, created_at);
 CREATE INDEX IF NOT EXISTS reviews_app_lang_created ON reviews (appid, language, created_at);
 
--- Distinct terms per review (keyword-language reviews only), used for keyword counts and the term filter.
+-- Distinct terms per review (every language), used for keyword counts and the term filter.
 CREATE TABLE IF NOT EXISTS review_terms (
   recommendation_id  TEXT NOT NULL,
   appid              INTEGER NOT NULL,

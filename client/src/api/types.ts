@@ -1,6 +1,8 @@
 export type SegmentId = 'new' | 'normal' | 'hard';
 export type Sentiment = 'p' | 'n';
 export type RangeId = '7d' | '30d' | 'all';
+/** new = newest first, old = oldest first, helpful = most helpful first. */
+export type ReviewSort = 'new' | 'old' | 'helpful';
 
 export interface SyncStatus {
   runId: number;
@@ -23,6 +25,9 @@ export interface Game {
   steamTotalReviews: number | null;
   steamTotalPositive: number | null;
   coveredFrom: number | null;
+  /** First and last selectable days ('YYYY-MM-DD', dashboard timezone). */
+  firstDay: string | null;
+  today: string;
   lastSyncedAt: number | null;
   storedReviews: number;
   storedDays: number;
@@ -60,7 +65,8 @@ export interface Summary {
   perDay: number;
   pooledRate: number | null;
   lowestDay: (DailyPoint & { volumeRatio: number | null }) | null;
-  keywordLanguageReviews: number;
+  /** Selected languages; empty = all. */
+  languages: string[];
   insights: { trend: string | null; segments: string | null };
 }
 
@@ -91,7 +97,8 @@ export interface KeywordTerm {
 
 export interface KeywordResult {
   range: { from: string; to: string };
-  language: string;
+  /** Selected languages; empty = all. */
+  languages: string[];
   reviews: { total: number; positive: number; negative: number };
   minReviews: number;
   insufficient: boolean;
@@ -105,12 +112,20 @@ export interface ReviewItem {
   createdAt: number;
   date: string;
   votedUp: boolean;
+  /** Steam language code. */
+  language: string;
   text: string;
   excerpt: string | null;
   votesUp: number;
   playtimeAtReviewHours: number;
   segment: SegmentId;
   url: string;
+}
+
+export interface LanguageCount {
+  code: string;
+  count: number;
+  positive: number;
 }
 
 export interface ReviewPage {

@@ -46,8 +46,6 @@ export const config = {
   ] as const,
 
   keywords: {
-    /** Steam language code analysed for keywords. */
-    language: 'schinese',
     /** Below this many reviews in the selection, keywords are not shown. */
     minReviews: num('KEYWORDS_MIN_REVIEWS', 20),
     /** A term must appear in at least this many reviews to be listed. */

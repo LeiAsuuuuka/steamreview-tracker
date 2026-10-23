@@ -23,7 +23,7 @@ export function normalizeForTerms(text: string): string {
 /** Split into sentences on Chinese and Latin terminators and line breaks. */
 export function splitSentences(text: string): string[] {
   return cleanReview(text)
-    .split(/(?<=[。！？!?；;…])|\n+/)
+    .split(/(?<=[。！？!?；;…])|(?<=\.)\s+|\n+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }

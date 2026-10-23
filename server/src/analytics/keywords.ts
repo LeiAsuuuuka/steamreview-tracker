@@ -2,6 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { config, type SegmentId } from '../config.js';
 import { db as sharedDb } from '../db/index.js';
 import { splitSentences } from '../text/normalize.js';
+import { langClause } from './langs.js';
 import { makeRange, type DateRange } from './range.js';
 import { segmentSql } from './segments.js';
 import { addDays, dayKey, isoWeek, today, weekBounds } from './time.js';
@@ -11,6 +12,8 @@ export type Sentiment = 'p' | 'n';
 export interface Scope {
   range: DateRange;
   segment?: SegmentId;
+  /** Steam language codes; empty or missing = all languages. */
+  langs?: string[];
 }
 
 export interface KeywordTerm {
@@ -24,7 +27,8 @@ export interface KeywordTerm {
 
 export interface KeywordResult {
   range: { from: string; to: string };
-  language: string;
+  /** Selected languages; empty = all. */
+  languages: string[];
   reviews: { total: number; positive: number; negative: number };
   minReviews: number;
   insufficient: boolean;
@@ -35,8 +39,9 @@ export interface KeywordResult {
 }
 
 function scopeWhere(scope: Scope, alias = 'r'): { sql: string; params: SQLInputValue[] } {
-  let sql = `${alias}.language = ? AND ${alias}.created_at >= ? AND ${alias}.created_at < ?`;
-  const params: SQLInputValue[] = [config.keywords.language, scope.range.fromTs, scope.range.toTs];
+  const lang = langClause(scope.langs, `${alias}.language`);
+  let sql = `${alias}.created_at >= ? AND ${alias}.created_at < ?${lang.sql}`;
+  const params: SQLInputValue[] = [scope.range.fromTs, scope.range.toTs, ...lang.params];
   if (scope.segment) {
     sql += ` AND ${segmentSql(`${alias}.playtime_at_review_min`)} = ?`;
     params.push(scope.segment);
@@ -66,7 +71,7 @@ export function keywords(appid: number, scope: Scope, conn: DatabaseSync = share
 
   const base: KeywordResult = {
     range: { from: scope.range.from, to: scope.range.to },
-    language: config.keywords.language,
+    languages: scope.langs ?? [],
     reviews: { total, positive: nPos, negative: nNeg },
     minReviews: config.keywords.minReviews,
     insufficient: total < config.keywords.minReviews,
@@ -77,17 +82,18 @@ export function keywords(appid: number, scope: Scope, conn: DatabaseSync = share
   if (base.insufficient) return base;
 
   // Baseline for IDF: stored reviews outside the selected days if there are enough, else the selection itself.
+  const lang = langClause(scope.langs, 'r.language');
+  const outsideWhere = {
+    sql: `(r.created_at < ? OR r.created_at >= ?)${lang.sql}`,
+    params: [scope.range.fromTs, scope.range.toTs, ...lang.params] as SQLInputValue[],
+  };
   const outside = conn
-    .prepare(
-      `SELECT COUNT(*) AS n FROM reviews WHERE appid = ? AND language = ? AND (created_at < ? OR created_at >= ?)`,
-    )
-    .get(appid, config.keywords.language, scope.range.fromTs, scope.range.toTs) as { n: number };
+    .prepare(`SELECT COUNT(*) AS n FROM reviews r WHERE r.appid = ? AND ${outsideWhere.sql}`)
+    .get(appid, ...outsideWhere.params) as { n: number };
   const useHistory = outside.n >= config.keywords.minReviews;
   base.baseline = useHistory ? 'history' : 'selection';
 
-  const baseWhere = useHistory
-    ? { sql: 'r.language = ? AND (r.created_at < ? OR r.created_at >= ?)', params: [config.keywords.language, scope.range.fromTs, scope.range.toTs] }
-    : where;
+  const baseWhere = useHistory ? outsideWhere : where;
   const nBase = useHistory ? outside.n : total;
   const baseDf = new Map(
     (
@@ -135,15 +141,21 @@ export interface WeekOption {
 }
 
 /** Periods the talking points can show: the last 7 days, then each ISO week with stored reviews. */
-export function weekOptions(appid: number, coveredFrom: number | null, conn: DatabaseSync = sharedDb()): WeekOption[] {
+export function weekOptions(
+  appid: number,
+  coveredFrom: number | null,
+  langs: string[] = [],
+  conn: DatabaseSync = sharedDb(),
+): WeekOption[] {
   const end = today();
   const tz = config.tzOffsetHours * 3600;
+  const lang = langClause(langs);
   const rows = conn
     .prepare(
       `SELECT date(created_at + ?, 'unixepoch') AS day, COUNT(*) AS n FROM reviews
-       WHERE appid = ? AND language = ? GROUP BY day`,
+       WHERE appid = ?${lang.sql} GROUP BY day`,
     )
-    .all(tz, appid, config.keywords.language) as { day: string; n: number }[];
+    .all(tz, appid, ...lang.params) as { day: string; n: number }[];
   const firstDay = coveredFrom ? dayKey(coveredFrom) : null;
   const countIn = (from: string, to: string) =>
     rows.filter((r) => r.day >= from && r.day <= to).reduce((s, r) => s + r.n, 0);
@@ -169,9 +181,19 @@ export function rangeForPeriod(period: unknown): DateRange {
   return makeRange(addDays(end, -6), end);
 }
 
+/** new = newest first (default), old = oldest first, helpful = most helpful votes first. */
+export type ReviewSort = 'new' | 'old' | 'helpful';
+
+const ORDER: Record<ReviewSort, string> = {
+  new: 'r.created_at DESC, r.recommendation_id DESC',
+  old: 'r.created_at ASC, r.recommendation_id ASC',
+  helpful: 'r.votes_up DESC, r.weighted_score DESC, r.created_at DESC',
+};
+
 export interface ReviewFilters extends Scope {
   sentiment?: Sentiment;
   term?: string;
+  sort?: ReviewSort;
   page?: number;
   pageSize?: number;
 }
@@ -181,6 +203,8 @@ export interface ReviewItem {
   createdAt: number;
   date: string;
   votedUp: boolean;
+  /** Steam language code. */
+  language: string;
   text: string;
   /** Best sentence for long reviews; null when the full text is short enough. */
   excerpt: string | null;
@@ -218,11 +242,11 @@ export function reviewList(appid: number, f: ReviewFilters, conn: DatabaseSync =
   const page = Math.max(1, f.page ?? 1);
   const rows = conn
     .prepare(
-      `SELECT r.recommendation_id AS id, r.author_steamid, r.created_at, r.voted_up, r.text, r.votes_up,
+      `SELECT r.recommendation_id AS id, r.author_steamid, r.created_at, r.voted_up, r.language, r.text, r.votes_up,
               r.playtime_at_review_min,
               ${segmentSql('r.playtime_at_review_min')} AS seg
        ${sql}
-       ORDER BY r.votes_up DESC, r.weighted_score DESC, r.created_at DESC
+       ORDER BY ${ORDER[f.sort ?? 'new']}
        LIMIT ? OFFSET ?`,
     )
     .all(...params, pageSize, (page - 1) * pageSize) as Record<string, any>[];
@@ -232,6 +256,7 @@ export function reviewList(appid: number, f: ReviewFilters, conn: DatabaseSync =
     createdAt: r.created_at,
     date: dayKey(r.created_at),
     votedUp: r.voted_up === 1,
+    language: r.language,
     text: r.text,
     excerpt: excerptFor(r.text, f.term),
     votesUp: r.votes_up,
@@ -241,5 +266,5 @@ export function reviewList(appid: number, f: ReviewFilters, conn: DatabaseSync =
       ? `https://steamcommunity.com/profiles/${r.author_steamid}/recommended/${appid}/`
       : `https://steamcommunity.com/app/${appid}/reviews/`,
   }));
-  return { total, page, pageSize, items };
+  return { total, page, pageSize, sort: f.sort ?? 'new', items };
 }

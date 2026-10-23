@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { usePeriods, useKeywords, useReviews } from '../api/hooks';
-import type { KeywordTerm, ReviewItem, SegmentId, Sentiment } from '../api/types';
+import type { KeywordTerm, ReviewItem, ReviewSort, SegmentId, Sentiment } from '../api/types';
 import { SEGMENT_COLOR, SEGMENT_SHORT, dayLabel, int } from '../format';
+import { langName, langSummary, langTag } from '../languages';
 import type { DashboardParams } from '../state/useDashboardParams';
 
 interface Props {
@@ -9,6 +10,9 @@ interface Props {
   params: DashboardParams;
   update: (p: Partial<DashboardParams>) => void;
   ready: boolean;
+  /** Earliest stored day and today, bounding the custom date pickers. */
+  firstDay: string | null;
+  today: string;
 }
 
 const PAGE = 12;
@@ -31,7 +35,7 @@ function Highlight({ text, terms }: { text: string; terms: string[] }) {
   );
 }
 
-function ReviewCard({ r, terms }: { r: ReviewItem; terms: string[] }) {
+function ReviewCard({ r, terms, showLang }: { r: ReviewItem; terms: string[]; showLang: boolean }) {
   const [full, setFull] = useState(false);
   const body = full || !r.excerpt ? r.text : r.excerpt;
   return (
@@ -42,9 +46,10 @@ function ReviewCard({ r, terms }: { r: ReviewItem; terms: string[] }) {
           <i style={{ background: SEGMENT_COLOR[r.segment] }} />
           {r.playtimeAtReviewHours} h · {SEGMENT_SHORT[r.segment]}
         </span>
+        {showLang && <span className="rv-lang" lang={langTag(r.language)}>{langName(r.language)}</span>}
         <span className="when">{dayLabel(r.date, { weekday: false })}</span>
       </div>
-      <p lang="zh-Hans">
+      <p lang={langTag(r.language)}>
         <Highlight text={body} terms={terms} />
       </p>
       <div className="rv-foot">
@@ -94,7 +99,7 @@ function KeywordList({
               title={`${k.count} reviews (${Math.round(k.share * 100)}%) mention “${k.term}”`}
             >
               <span className="bar" style={{ width: `${Math.max(10, (k.count / max) * 100)}%`, background: `var(--${tone})` }} />
-              <span className="t" lang="zh-Hans">{k.term}</span>
+              <span className="t">{k.term}</span>
               <span className="c">{k.count}</span>
             </button>
           ))}
@@ -104,16 +109,33 @@ function KeywordList({
   );
 }
 
-export function TalkingPoints({ appid, params, update, ready }: Props) {
+const SORTS: [ReviewSort, string][] = [['new', 'Newest'], ['old', 'Oldest'], ['helpful', 'Most helpful']];
+
+const shortDay = (d: string) => dayLabel(d, { weekday: false });
+
+export function TalkingPoints({ appid, params, update, ready, firstDay, today }: Props) {
   const [pageSize, setPageSize] = useState(PAGE);
-  const periods = usePeriods(appid, ready);
-  const scope = { period: params.period, day: params.day, segment: params.segment };
+  const periods = usePeriods(appid, params.langs, ready);
+  const custom = !!(params.from && params.to);
+  const scope = {
+    period: params.period,
+    from: custom ? params.from : null,
+    to: custom ? params.to : null,
+    day: params.day,
+    segment: params.segment,
+    langs: params.langs,
+  };
+  const langText = params.langs.length ? langSummary(params.langs) : 'all languages';
   const kw = useKeywords(appid, scope, ready);
-  const reviews = useReviews(appid, { ...scope, sentiment: params.sentiment, term: params.term }, pageSize, ready);
+  const reviews = useReviews(
+    appid,
+    { ...scope, sentiment: params.sentiment, term: params.term, sort: params.sort },
+    pageSize,
+    ready,
+  );
 
   const list = periods.data ?? [];
-  const idx = Math.max(0, list.findIndex((p) => p.id === params.period));
-  const current = list[idx];
+  const current = list.find((p) => p.id === params.period) ?? list[0];
 
   const set = (patch: Partial<DashboardParams>) => {
     setPageSize(PAGE);
@@ -132,41 +154,68 @@ export function TalkingPoints({ appid, params, update, ready }: Props) {
     : [...(k?.positive ?? []).slice(0, 6), ...(k?.negative ?? []).slice(0, 6)].map((t) => t.term);
   const rv = reviews.data;
 
-  const periodText = params.day
-    ? dayLabel(params.day)
-    : current
-      ? current.id === 'last7'
-        ? `Last 7 days · ${dayLabel(current.from, { weekday: false })} – ${dayLabel(current.to, { weekday: false })}`
-        : `${current.id} · ${dayLabel(current.from, { weekday: false })} – ${dayLabel(current.to, { weekday: false })}`
-      : 'Last 7 days';
+  const pickPeriod = (value: string) => {
+    if (value === 'custom') {
+      // Start the custom range from what is showing now, so nothing jumps.
+      const base = params.day ? { from: params.day, to: params.day } : current ?? { from: firstDay ?? today, to: today };
+      set({ from: base.from, to: base.to, day: null });
+    } else {
+      set({ period: value, from: null, to: null, day: null });
+    }
+  };
+
+  const setDate = (which: 'from' | 'to', value: string) => {
+    if (!value) return;
+    const next = { from: params.from ?? today, to: params.to ?? today, [which]: value };
+    // Keep the range in order whichever end moved.
+    if (next.from > next.to) [next.from, next.to] = [next.to, next.from];
+    set({ ...next, day: null });
+  };
 
   return (
     <section className="card tp" aria-labelledby="tp-h">
       <div className="tp-h">
         <h2 id="tp-h">Talking points</h2>
-        <div className="weekstep">
-          <button
-            type="button"
-            aria-label="Earlier period"
-            disabled={!!params.day || idx >= list.length - 1}
-            onClick={() => set({ period: list[idx + 1].id })}
-          >
-            ‹
-          </button>
-          <span>
-            {periodText}
-            {k && ` · ${int(k.reviews.total)} Chinese reviews`}
-          </span>
-          <button
-            type="button"
-            aria-label="Later period"
-            disabled={!!params.day || idx <= 0}
-            onClick={() => set({ period: list[idx - 1].id })}
-          >
-            ›
-          </button>
+        <div className="period">
+          <label htmlFor="tp-period" className="flabel">Period</label>
+          <select id="tp-period" value={custom ? 'custom' : current?.id ?? 'last7'} onChange={(e) => pickPeriod(e.target.value)}>
+            {list.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.id === 'last7' ? 'Last 7 days' : `${p.id} · ${shortDay(p.from)} – ${shortDay(p.to)}`} ({int(p.reviews)})
+              </option>
+            ))}
+            {!list.length && <option value="last7">Last 7 days</option>}
+            <option value="custom">Custom dates…</option>
+          </select>
+          {custom && (
+            <span className="dates">
+              <input
+                id="tp-from"
+                type="date"
+                aria-label="From"
+                value={params.from ?? ''}
+                min={firstDay ?? undefined}
+                max={today}
+                onChange={(e) => setDate('from', e.target.value)}
+              />
+              <span aria-hidden="true">–</span>
+              <input
+                id="tp-to"
+                type="date"
+                aria-label="To"
+                value={params.to ?? ''}
+                min={firstDay ?? undefined}
+                max={today}
+                onChange={(e) => setDate('to', e.target.value)}
+              />
+            </span>
+          )}
+          {k && <span className="period-n">{int(k.reviews.total)} reviews</span>}
         </div>
       </div>
+      {custom && firstDay && params.from && params.from < firstDay && (
+        <p className="note">Reviews before {shortDay(firstDay)} aren’t stored yet, so the start of this range is empty.</p>
+      )}
 
       <div className="filters">
         <div className="grp">
@@ -195,7 +244,10 @@ export function TalkingPoints({ appid, params, update, ready }: Props) {
 
       <div className="active-filters">
         {chips.length === 0 ? (
-          <span>Showing all Simplified Chinese reviews for this period. Pick a keyword, a day on the chart or a player type to narrow it down.</span>
+          <span>
+            Showing reviews in {langText} for this period. Pick a keyword, a day on the chart or a player type to narrow it
+            down, or change languages at the top.
+          </span>
         ) : (
           <>
             <span>Filtered by</span>
@@ -220,8 +272,8 @@ export function TalkingPoints({ appid, params, update, ready }: Props) {
             <p className="note">Loading keywords…</p>
           ) : k.insufficient ? (
             <div className="empty">
-              Only {k.reviews.total} Simplified Chinese reviews here. Keywords need at least {k.minReviews}. Try a longer
-              period or remove filters.
+              Only {k.reviews.total} reviews in {langText} here. Keywords need at least {k.minReviews}. Try a longer
+              period, add languages or remove filters.
             </div>
           ) : (
             <>
@@ -255,12 +307,19 @@ export function TalkingPoints({ appid, params, update, ready }: Props) {
 
         <div className="rv-col">
           <div className="rv-h">
-            <h3>{params.term ? `Reviews mentioning “${params.term}”` : 'Most helpful reviews'}</h3>
+            <h3>{params.term ? `Reviews mentioning “${params.term}”` : 'Reviews'}</h3>
             {rv && rv.total > 0 && (
               <small>
                 Showing {Math.min(rv.items.length, rv.total)} of {int(rv.total)}
               </small>
             )}
+            <div className="seg-ctl sort" role="group" aria-label="Sort reviews">
+              {SORTS.map(([v, label]) => (
+                <button key={v} type="button" aria-pressed={params.sort === v} onClick={() => set({ sort: v })}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           {reviews.isError ? (
             <p className="note error">{(reviews.error as Error).message}</p>
@@ -282,7 +341,7 @@ export function TalkingPoints({ appid, params, update, ready }: Props) {
             <>
               <ul className="reviews" style={{ opacity: reviews.isPlaceholderData ? 0.6 : 1 }}>
                 {rv.items.map((r) => (
-                  <ReviewCard key={r.id} r={r} terms={highlightTerms} />
+                  <ReviewCard key={r.id} r={r} terms={highlightTerms} showLang={params.langs.length !== 1} />
                 ))}
               </ul>
               {rv.total > rv.items.length && (

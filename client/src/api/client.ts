@@ -1,5 +1,6 @@
 import type {
-  DailyPoint, Game, KeywordResult, Period, RangeId, ReviewPage, SearchResult, SegmentId, SegmentRow, Sentiment, Summary,
+  DailyPoint, Game, KeywordResult, LanguageCount, Period, RangeId, ReviewPage, ReviewSort, SearchResult, SegmentId,
+  SegmentRow, Sentiment, Summary,
 } from './types';
 
 export class ApiError extends Error {
@@ -33,10 +34,17 @@ function qs(params: Record<string, string | number | undefined | null>): string 
   return s ? `?${s}` : '';
 }
 
+/** Comma-joined Steam language codes; empty = all languages (param omitted). */
+const lang = (langs: string[]) => (langs.length ? langs.join(',') : undefined);
+
 export interface TalkingScope {
   period: string;
+  /** Custom date range ('YYYY-MM-DD'); overrides the period when both are set. */
+  from?: string | null;
+  to?: string | null;
   day?: string | null;
   segment?: SegmentId | null;
+  langs: string[];
 }
 
 export const api = {
@@ -44,18 +52,33 @@ export const api = {
   games: () => request<Game[]>('/games'),
   game: (appid: number) => request<Game>(`/games/${appid}`),
   sync: (appid: number) => request<Game>(`/games/${appid}/sync`, { method: 'POST' }),
-  summary: (appid: number, range: RangeId) => request<Summary>(`/games/${appid}/summary${qs({ range })}`),
-  daily: (appid: number, range: RangeId) =>
-    request<{ range: { from: string; to: string }; points: DailyPoint[] }>(`/games/${appid}/daily${qs({ range })}`),
-  segments: (appid: number, range: RangeId) =>
-    request<{ range: { from: string; to: string }; segments: SegmentRow[] }>(`/games/${appid}/segments${qs({ range })}`),
-  periods: (appid: number) => request<Period[]>(`/games/${appid}/periods`),
+  languages: (appid: number, range: RangeId) =>
+    request<{ range: { from: string; to: string }; languages: LanguageCount[] }>(`/games/${appid}/languages${qs({ range })}`),
+  summary: (appid: number, range: RangeId, langs: string[]) =>
+    request<Summary>(`/games/${appid}/summary${qs({ range, lang: lang(langs) })}`),
+  daily: (appid: number, range: RangeId, langs: string[]) =>
+    request<{ range: { from: string; to: string }; points: DailyPoint[] }>(
+      `/games/${appid}/daily${qs({ range, lang: lang(langs) })}`,
+    ),
+  segments: (appid: number, range: RangeId, langs: string[]) =>
+    request<{ range: { from: string; to: string }; segments: SegmentRow[] }>(
+      `/games/${appid}/segments${qs({ range, lang: lang(langs) })}`,
+    ),
+  periods: (appid: number, langs: string[]) => request<Period[]>(`/games/${appid}/periods${qs({ lang: lang(langs) })}`),
   keywords: (appid: number, s: TalkingScope) =>
-    request<KeywordResult>(`/games/${appid}/keywords${qs({ period: s.period, day: s.day, segment: s.segment })}`),
-  reviews: (appid: number, s: TalkingScope & { sentiment?: Sentiment | null; term?: string | null; page: number; pageSize: number }) =>
+    request<KeywordResult>(
+      `/games/${appid}/keywords${qs({
+        period: s.period, from: s.from, to: s.to, day: s.day, segment: s.segment, lang: lang(s.langs),
+      })}`,
+    ),
+  reviews: (
+    appid: number,
+    s: TalkingScope & { sentiment?: Sentiment | null; term?: string | null; sort: ReviewSort; page: number; pageSize: number },
+  ) =>
     request<ReviewPage>(
       `/games/${appid}/reviews${qs({
-        period: s.period, day: s.day, segment: s.segment, sentiment: s.sentiment, term: s.term, page: s.page, pageSize: s.pageSize,
+        period: s.period, from: s.from, to: s.to, day: s.day, segment: s.segment, lang: lang(s.langs),
+        sentiment: s.sentiment, term: s.term, sort: s.sort, page: s.page, pageSize: s.pageSize,
       })}`,
     ),
 };

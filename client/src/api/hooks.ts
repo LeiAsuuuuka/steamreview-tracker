@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { api, type TalkingScope } from './client';
-import type { RangeId, SegmentId, Sentiment } from './types';
+import type { RangeId, ReviewSort, SegmentId, Sentiment } from './types';
 
 export const keys = {
   game: (appid: number) => ['game', appid] as const,
@@ -50,20 +50,44 @@ export function useAutoSync(appid: number) {
 
 const dataOpts = { placeholderData: keepPreviousData, staleTime: 60_000 } as const;
 
-export function useSummary(appid: number, range: RangeId, enabled: boolean) {
-  return useQuery({ queryKey: [...keys.data(appid), 'summary', range], queryFn: () => api.summary(appid, range), enabled, ...dataOpts });
+export function useLanguages(appid: number, range: RangeId, enabled: boolean) {
+  return useQuery({ queryKey: [...keys.data(appid), 'languages', range], queryFn: () => api.languages(appid, range), enabled, ...dataOpts });
 }
 
-export function useDaily(appid: number, range: RangeId, enabled: boolean) {
-  return useQuery({ queryKey: [...keys.data(appid), 'daily', range], queryFn: () => api.daily(appid, range), enabled, ...dataOpts });
+export function useSummary(appid: number, range: RangeId, langs: string[], enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.data(appid), 'summary', range, langs],
+    queryFn: () => api.summary(appid, range, langs),
+    enabled,
+    ...dataOpts,
+  });
 }
 
-export function useSegments(appid: number, range: RangeId, enabled: boolean) {
-  return useQuery({ queryKey: [...keys.data(appid), 'segments', range], queryFn: () => api.segments(appid, range), enabled, ...dataOpts });
+export function useDaily(appid: number, range: RangeId, langs: string[], enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.data(appid), 'daily', range, langs],
+    queryFn: () => api.daily(appid, range, langs),
+    enabled,
+    ...dataOpts,
+  });
 }
 
-export function usePeriods(appid: number, enabled: boolean) {
-  return useQuery({ queryKey: [...keys.data(appid), 'periods'], queryFn: () => api.periods(appid), enabled, ...dataOpts });
+export function useSegments(appid: number, range: RangeId, langs: string[], enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.data(appid), 'segments', range, langs],
+    queryFn: () => api.segments(appid, range, langs),
+    enabled,
+    ...dataOpts,
+  });
+}
+
+export function usePeriods(appid: number, langs: string[], enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.data(appid), 'periods', langs],
+    queryFn: () => api.periods(appid, langs),
+    enabled,
+    ...dataOpts,
+  });
 }
 
 export function useKeywords(appid: number, scope: TalkingScope, enabled: boolean) {
@@ -72,7 +96,7 @@ export function useKeywords(appid: number, scope: TalkingScope, enabled: boolean
 
 export function useReviews(
   appid: number,
-  scope: TalkingScope & { sentiment: Sentiment | null; term: string | null; segment: SegmentId | null },
+  scope: TalkingScope & { sentiment: Sentiment | null; term: string | null; segment: SegmentId | null; sort: ReviewSort },
   pageSize: number,
   enabled: boolean,
 ) {

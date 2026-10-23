@@ -71,6 +71,32 @@ img { max-width: 100%; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
 .btn.link { border: 0; background: transparent; color: var(--accent); padding: 2px 4px; }
 
+/* language picker */
+.lang-picker { position: relative; }
+.lang-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 280px; }
+.lang-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.lang-icon { font-size: 11px; font-weight: 600; letter-spacing: -0.02em; }
+.lang-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lang-count { font-family: var(--font-mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lang-pop { position: absolute; z-index: 25; top: calc(100% + 6px); right: 0; width: min(360px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 16px 40px -18px rgba(0, 0, 0, 0.4); padding: 10px; display: grid; gap: 6px; }
+.lang-pop-h { display: grid; gap: 2px; padding: 2px 6px 6px; border-bottom: 1px solid var(--line); }
+.lang-pop-h small { color: var(--muted); font-size: 12px; }
+.lang-list { display: grid; gap: 1px; max-height: 340px; overflow-y: auto; }
+.lang-row { display: grid; grid-template-columns: minmax(0, 1fr) 56px 44px 38px; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px; font-size: 14px; }
+.lang-row:hover { background: var(--sunken); }
+.lang-row label, .lang-row.all { display: flex; align-items: center; gap: 8px; cursor: pointer; min-width: 0; }
+.lang-row.all { display: grid; grid-template-columns: auto minmax(0, 1fr) 44px; font-weight: 600; }
+.lang-row input { accent-color: var(--accent); margin: 0; flex: none; }
+.lang-name { display: grid; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lang-name small { color: var(--muted); font-size: 11px; }
+.lang-bar { height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden; }
+.lang-bar i { display: block; height: 100%; background: var(--accent); opacity: 0.6; }
+.lang-n { font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.lang-only { font-size: 12px; visibility: hidden; }
+.lang-row:hover .lang-only, .lang-only:focus-visible { visibility: visible; }
+@media (hover: none) { .lang-only { visibility: visible; } }
+.rv-lang { font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+
 .banner { padding: 10px 14px; border-radius: 8px; font-size: 14px; }
 .banner.error, .error { color: var(--neg); }
 .banner.error { background: var(--neg-soft); }
@@ -150,6 +176,15 @@ img { max-width: 100%; }
 .tp { padding: 18px; display: grid; gap: 14px; }
 .tp-h { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
 .tp-h h2 { font-size: 19px; }
+.period { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; font-size: 13px; }
+.period select, .period input[type="date"] { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+.period select { cursor: pointer; }
+.period input[type="date"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.period select:focus-visible, .period input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.period .dates { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.period-n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rv-h .sort { margin-left: auto; }
+.rv-h .sort button { font-size: 12px; padding: 3px 9px; }
 .weekstep { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; flex-wrap: wrap; }
 .weekstep button { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
 .weekstep button:disabled { opacity: 0.4; cursor: not-allowed; }

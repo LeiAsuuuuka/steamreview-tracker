@@ -1,8 +1,12 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { config } from './config.js';
 import { db } from './db/index.js';
-import { keywords, rangeForPeriod, reviewList, weekOptions, type Sentiment } from './analytics/keywords.js';
-import { daily, segments, summary } from './analytics/metrics.js';
+import {
+  keywords, rangeForPeriod, reviewList, weekOptions, type ReviewSort, type Sentiment,
+} from './analytics/keywords.js';
+import { dayKey, daysBetween, today } from './analytics/time.js';
+import { parseLangs } from './analytics/langs.js';
+import { daily, languages, segments, summary } from './analytics/metrics.js';
 import { makeRange, resolveRange, storedDays, type DateRange } from './analytics/range.js';
 import { isSegmentId } from './analytics/segments.js';
 import { fetchAppDetails, searchApps } from './steam/client.js';
@@ -63,6 +67,9 @@ function gameView(g: GameRow) {
     steamTotalReviews: g.total_reviews,
     steamTotalPositive: g.total_positive,
     coveredFrom: g.covered_from,
+    /** First and last selectable days ('YYYY-MM-DD', dashboard timezone) for date pickers. */
+    firstDay: g.covered_from ? dayKey(g.covered_from) : null,
+    today: today(),
     lastSyncedAt: g.last_synced_at,
     storedReviews: stored.n,
     storedDays: storedDays(g.covered_from),
@@ -72,11 +79,21 @@ function gameView(g: GameRow) {
   };
 }
 
-/** Selection for talking points: a single day overrides the period. */
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Selection for talking points: a single day, else custom from/to dates, else a period ('last7' or an ISO week). */
 function scopeRange(q: Request['query']): DateRange {
-  if (typeof q.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.day)) return makeRange(q.day, q.day);
+  if (typeof q.day === 'string' && DAY_RE.test(q.day)) return makeRange(q.day, q.day);
+  if (typeof q.from === 'string' && typeof q.to === 'string' && DAY_RE.test(q.from) && DAY_RE.test(q.to)) {
+    const [from, to] = q.from <= q.to ? [q.from, q.to] : [q.to, q.from];
+    if (daysBetween(from, to) > 366) throw new HttpError(400, 'Pick a date range of one year or less.');
+    return makeRange(from, to);
+  }
   return rangeForPeriod(q.period);
 }
+
+const sortQ = (q: Request['query']): ReviewSort =>
+  q.sort === 'old' || q.sort === 'helpful' ? q.sort : 'new';
 
 const segmentQ = (q: Request['query']) => (isSegmentId(q.segment) ? q.segment : undefined);
 const sentimentQ = (q: Request['query']): Sentiment | undefined =>
@@ -86,7 +103,6 @@ api.get('/config', () => ({
   tzOffsetHours: config.tzOffsetHours,
   segments: config.segments.map(({ id, name, label }) => ({ id, name, label })),
   minDailyReviews: config.metrics.minDailyReviews,
-  keywordLanguage: config.keywords.language,
   initialDays: config.sync.initialDays,
 }));
 
@@ -143,7 +159,16 @@ api.get(
   '/games/:appid/summary',
   wrap((req) => {
     const g = requireGame(appidParam(req));
-    return summary(g.appid, resolveRange(req.query, g.covered_from), g.covered_from);
+    return summary(g.appid, resolveRange(req.query, g.covered_from), g.covered_from, parseLangs(req.query.lang));
+  }),
+);
+
+api.get(
+  '/games/:appid/languages',
+  wrap((req) => {
+    const g = requireGame(appidParam(req));
+    const range = resolveRange(req.query, g.covered_from);
+    return { range: { from: range.from, to: range.to }, languages: languages(g.appid, range) };
   }),
 );
 
@@ -152,7 +177,7 @@ api.get(
   wrap((req) => {
     const g = requireGame(appidParam(req));
     const range = resolveRange(req.query, g.covered_from);
-    return { range: { from: range.from, to: range.to }, points: daily(g.appid, range) };
+    return { range: { from: range.from, to: range.to }, points: daily(g.appid, range, parseLangs(req.query.lang)) };
   }),
 );
 
@@ -161,7 +186,7 @@ api.get(
   wrap((req) => {
     const g = requireGame(appidParam(req));
     const range = resolveRange(req.query, g.covered_from);
-    return { range: { from: range.from, to: range.to }, segments: segments(g.appid, range) };
+    return { range: { from: range.from, to: range.to }, segments: segments(g.appid, range, parseLangs(req.query.lang)) };
   }),
 );
 
@@ -169,7 +194,7 @@ api.get(
   '/games/:appid/periods',
   wrap((req) => {
     const g = requireGame(appidParam(req));
-    return weekOptions(g.appid, g.covered_from);
+    return weekOptions(g.appid, g.covered_from, parseLangs(req.query.lang));
   }),
 );
 
@@ -177,7 +202,11 @@ api.get(
   '/games/:appid/keywords',
   wrap((req) => {
     const g = requireGame(appidParam(req));
-    return keywords(g.appid, { range: scopeRange(req.query), segment: segmentQ(req.query) });
+    return keywords(g.appid, {
+      range: scopeRange(req.query),
+      segment: segmentQ(req.query),
+      langs: parseLangs(req.query.lang),
+    });
   }),
 );
 
@@ -189,7 +218,9 @@ api.get(
     return reviewList(g.appid, {
       range: scopeRange(req.query),
       segment: segmentQ(req.query),
+      langs: parseLangs(req.query.lang),
       sentiment: sentimentQ(req.query),
+      sort: sortQ(req.query),
       term,
       page: Number(req.query.page) || 1,
       pageSize: Number(req.query.pageSize) || 12,

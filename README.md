@@ -4,7 +4,8 @@ A local Steam review trends tracker. Pick a game and it shows:
 
 - **Average daily positive rate** and a **daily trend chart** (with review volume)
 - **Player segments** by playtime at review: New (0–5 h), Normal (6–20 h), HardCore (21 h+)
-- **Weekly talking points**: top keywords in Simplified Chinese reviews, split by positive / negative, with the reviews behind each keyword
+- **Weekly talking points**: top keywords in reviews, split by positive / negative, with the reviews behind each keyword. Sort reviews by newest, oldest or most helpful, and pick any date range.
+- **Review language picker**: pick one or more languages (简体中文, English, 日本語, Русский …) and every number on the page uses only those reviews. The choice is kept in the URL and remembered for the next game.
 
 Reviews come from Steam's public store endpoints (no API key) and are stored in a local SQLite file, so history grows each time you sync.
 
@@ -26,7 +27,7 @@ Other commands:
 | Command | What it does |
 | --- | --- |
 | `npm run sync -- 1145360` | Sync one or more App IDs from the terminal and print a report |
-| `npm run reindex` | Rebuild keyword terms after editing `server/src/text/lexicon.ts` |
+| `npm run reindex` | Rebuild keyword terms after editing `server/src/text/lexicon.ts` or `tokenize.ts` |
 | `npm test` | Server tests (time, segments, metrics, keywords, sync) |
 | `npm run typecheck` | Type-check server and client |
 | `npm run build && npm start` | Production build; the server then serves the app on http://localhost:3001 |
@@ -36,7 +37,8 @@ Other commands:
 - **Days** use China time (UTC+8). Change with `TZ_OFFSET_HOURS`.
 - **Average daily positive** = mean of each day's `positive / total`. Today (still in progress) and days with fewer than 5 reviews (`MIN_DAILY_REVIEWS`) are left out. **Overall positive** = all positives ÷ all reviews.
 - **Segments** use `playtime_at_review`: New < 6 h, Normal 6 h to < 21 h, HardCore ≥ 21 h. Edit `config.segments` in `server/src/config.ts`.
-- **Keywords** analyse only `schinese` reviews. Text is cleaned (BBCode, URLs, emoji), split with jieba plus a game-term dictionary, filtered with Chinese and gaming stopwords, and ranked by TF-IDF. Once earlier weeks are stored, they become the baseline, so recurring words sink and new topics rise. Keywords need at least 20 reviews in the selection (`KEYWORDS_MIN_REVIEWS`).
+- **Languages**: all reviews are stored. The picker filters every view by Steam language code (`?lang=schinese,english`); no selection means all languages.
+- **Keywords**: text is cleaned (BBCode, URLs, emoji) and split into words per language: jieba plus a game-term dictionary for Simplified and Traditional Chinese, and the built-in `Intl.Segmenter` for everything else (including Japanese and Thai, which have no spaces). Stopwords for Chinese, English, Russian, Spanish, Portuguese, German, French, Polish, Turkish, Japanese and Korean are removed, then terms are ranked by TF-IDF. Once earlier weeks are stored, they become the baseline, so recurring words sink and new topics rise. Keywords need at least 20 reviews in the selection (`KEYWORDS_MIN_REVIEWS`).
 
 ## Sync behaviour
 

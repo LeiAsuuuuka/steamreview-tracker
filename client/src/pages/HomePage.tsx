@@ -12,7 +12,7 @@ export function HomePage() {
         <h1>How are players feeling about your game this week?</h1>
         <p>
           Pick any Steam game. Review Pulse fetches its latest reviews, tracks the daily positive rate, shows which kind of
-          player is writing, and pulls out what Chinese-speaking players are talking about.
+          player is writing, and pulls out what players are talking about in the languages you pick.
         </p>
         <GameSearch autoFocus />
       </header>

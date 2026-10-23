@@ -1,5 +1,6 @@
 import type { DailyPoint, Summary } from '../api/types';
 import { dayLabel, int, pct } from '../format';
+import { langSummary } from '../languages';
 
 function Info({ tip }: { tip: string }) {
   return (
@@ -33,7 +34,13 @@ function Sparkline({ points }: { points: DailyPoint[] }) {
   );
 }
 
-export function KpiTiles({ summary, points, rangeLabel }: { summary: Summary; points: DailyPoint[]; rangeLabel: string }) {
+export function KpiTiles({
+  summary, points, rangeLabel, languageCount,
+}: { summary: Summary; points: DailyPoint[]; rangeLabel: string; languageCount: number }) {
+  const langs = summary.languages;
+  const langText = langs.length === 0
+    ? `${languageCount} language${languageCount === 1 ? '' : 's'}`
+    : langSummary(langs);
   const prev = summary.previous;
   const low = summary.lowestDay;
   return (
@@ -60,10 +67,10 @@ export function KpiTiles({ summary, points, rangeLabel }: { summary: Summary; po
       </div>
       <div className="card kpi">
         <span className="l">Reviews in range</span>
-        <Info tip="All reviews posted in the range, in every language." />
+        <Info tip="Reviews posted in the range, in the languages picked at the top." />
         <span className="v">{int(summary.total)}</span>
         <span className="s">
-          About {Math.round(summary.perDay)} a day · {int(summary.keywordLanguageReviews)} in Simplified Chinese
+          About {Math.round(summary.perDay)} a day · {langText}
         </span>
       </div>
       <div className="card kpi">

@@ -66,7 +66,15 @@ async function getJson(url: string): Promise<unknown> {
   for (let attempt = 0; attempt <= config.sync.maxRetries; attempt++) {
     await throttle();
     try {
-      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
+      // Steam answers retired endpoints with a 302 to the store homepage; following it
+      // would surface as a (retried) JSON parse error on the HTML.
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000), redirect: 'manual' });
+      if (res.status >= 300 && res.status < 400) {
+        throw new SteamError(
+          `Steam redirected ${new URL(url).pathname} to ${res.headers.get('location') ?? '?'} — the endpoint may have been retired`,
+          res.status
+        );
+      }
       if (res.status === 429 || res.status >= 500) {
         throw new SteamError(`Steam responded ${res.status}`, res.status);
       }
@@ -83,7 +91,11 @@ async function getJson(url: string): Promise<unknown> {
   throw lastError instanceof Error ? lastError : new SteamError(String(lastError));
 }
 
-/** One page of reviews, newest first. Pass cursor '*' for the first page. */
+/**
+ * One page of reviews, newest first. Pass cursor '*' for the first page.
+ * Uses /ajaxappreviews: the old /appreviews now 302s to the store homepage, and its
+ * documented successor IUserReviewsService/GetAppReviews returns a different shape.
+ */
 export async function fetchReviewPage(appid: number, cursor: string): Promise<ReviewPage> {
   const params = new URLSearchParams({
     json: '1',
@@ -94,7 +106,7 @@ export async function fetchReviewPage(appid: number, cursor: string): Promise<Re
     num_per_page: '100',
     cursor,
   });
-  const data = (await getJson(`${STORE}/appreviews/${appid}?${params}`)) as {
+  const data = (await getJson(`${STORE}/ajaxappreviews/${appid}?${params}`)) as {
     success?: number;
     cursor?: string;
     reviews?: SteamReview[];

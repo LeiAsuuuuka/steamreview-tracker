@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { Game, RangeId } from '../api/types';
 import { GameSearch } from './GameSearch';
@@ -14,9 +15,11 @@ interface Props {
   onRange?: (r: RangeId) => void;
   onSync?: () => void;
   syncPending?: boolean;
+  /** Extra controls after the range picker (the language picker). */
+  children?: ReactNode;
 }
 
-export function TopBar({ game, range, onRange, onSync, syncPending }: Props) {
+export function TopBar({ game, range, onRange, onSync, syncPending, children }: Props) {
   return (
     <header className="topbar">
       <Link to="/" className="brand">Review Pulse</Link>
@@ -40,6 +43,7 @@ export function TopBar({ game, range, onRange, onSync, syncPending }: Props) {
           })}
         </div>
       )}
+      {children}
       {game && onSync && (
         <button type="button" className="btn primary" onClick={onSync} disabled={game.syncing || syncPending}>
           {game.syncing ? 'Syncing…' : 'Sync now'}

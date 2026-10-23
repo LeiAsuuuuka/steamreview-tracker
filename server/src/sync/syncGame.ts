@@ -93,10 +93,8 @@ function insertPage(conn: DatabaseSync, appid: number, reviews: SteamReview[]): 
         r.written_during_early_access ? 1 : 0,
         fetchedAt,
       );
-      if (r.language === config.keywords.language) {
-        clearTerms.run(r.recommendationid);
-        for (const term of extractTerms(r.review ?? '')) addTerm.run(r.recommendationid, appid, term);
-      }
+      clearTerms.run(r.recommendationid);
+      for (const term of extractTerms(r.review ?? '', r.language)) addTerm.run(r.recommendationid, appid, term);
     }
   });
 }
